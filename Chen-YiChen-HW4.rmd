@@ -1,0 +1,587 @@
+---
+title: 'Homework 4: graphics practice'
+author:
+  - name: YiChen Chen
+date: '`r Sys.Date()`'
+output: distill::distill_article
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  eval = TRUE,
+	echo = TRUE,
+	message = FALSE,
+	error = FALSE,
+	warning = FALSE
+)
+options(digits=22)
+```
+
+[Here is this homework's `R` `markdown` (`rmd`) file](homework/Lastname-Firstname-HW4.rmd).
+
+In our previous class demonstrations and homeworks, we practiced exploring Citi Bike ride data to gain insights into the bike share's rebalancing efforts. In the process, we gained experience transforming data and mapping data to visual encodings. First, as a class we practiced using a workflow with Citi Bike data to create a new variable, an indicator whether bikes may have been rebalanced. Next, in homework two, we practiced mapping Citi Bike ride data onto the three attributes of color: hue, saturation, and luminance. In the process we were able to explore how useage, rebalancing efforts, or both may have changed between 2013 and 2019, and again before and after the pandemic began. This exploration also helped us consider some of the limitations of the particular visualization: it did not consider the effects of rebalancing or bike and docking station availability. In this assignment, we will try to account for those and other limitations in the visualizations, and in the process gain practice with new data graphics and *explaining* our insights to others.
+
+<aside>**Opportunity alert**: In *previous* homeworks, I've given you most of the code and you've filled in the blanks. This time, I'm giving you an opportunity to write your own code for most of this assignment using what you've learned. The type of code you'll need to write follows from past homeworks and class code demonstrations. If you get stuck, reviewing those should give you clues.</aside>
+
+# Preliminary setup
+
+Load libraries to access functions we'll use in this analysis. Of note, if you have not installed these packages, do so outside of this `rmd` file.
+
+```{r}
+library(tidyverse) # the usual
+library(sf)        # for map data
+library(patchwork) # for organizing multiple graphs
+library(ggthemes)  # collection of graph themes
+theme_set(theme_tufte(base_family = 'sans')) 
+```
+
+We'll use the same dataset as in our previous homework. Let's load our data and rename variables (as before),
+
+```{r}
+rider_trips <- read_csv('data/201909-citibike-tripdata.csv')
+rider_trips <- 
+  rider_trips %>% 
+  rename_all(function(x) gsub(' ', '_', x)) %>%
+  rename(start_time = starttime,
+         end_time = stoptime) %>%
+  mutate(tripduration = as.difftime(tripduration / 3600, units = 'hours') )
+```
+
+Previously, we considered that, in general, Citi Bike's available data include measures of several attributes for each bike ride. When a bikeshare customer begins their ride, Citi Bike measures these attributes,
+
+```         
+bikeid
+start_station_id
+start_station_name
+start_station_longitude
+start_station_latitude
+start_time
+```
+
+For the same record (row in the data), when a bikeshare customer ends their ride, Citi Bike measures additional attributes:
+
+```         
+end_station_id
+end_station_name
+end_station_longitude
+end_station_latitude
+end_time
+```
+
+We'll also use the variable `usertype`, and the calculated variable `tripduration`. Of note, while Citi Bike also records other attributes about the ride (*e.g.*, `birthyear`, `gender`), we'll ignore these here.
+
+Thus, for customer rides, any given ride begins at the same station that the previous ride ended. Described with math, for rides $n \in 1, 2, ... N$ of each bike $b \in 1, 2, ... B$, we can express bike location between rides as
+
+$$
+\textrm{end_station_name}_{b, n} = \textrm{start_station_name}_{b, n+1}  \mid \textrm{normal usage}
+$$
+
+This does not always hold, however, when Citi Bike intervenes between rides by removing a bike from a docking station for whatever reason (*e.g.*, rebalancing or repair); Citi Bike may redock the bike anywhere or not at all. By combining information for ride $n$ and $n+1$, we can create *intervention* observations and by filtering to only keep transitions where
+
+$$
+\textrm{end_station_name}_{b, n} \ne \textrm{start_station_name}_{b, n+1}  \mid \textrm{intervention}
+$$
+
+# Question 1 --- measuring CitiBike interventions (data transformations)
+
+## Question 1(a)
+
+Create observations for Citi Bike's "interventions". To create these, you'll need to perform several data transformations.
+
+Here's my suggestion for one approach. First, arrange the data by `bikeid` and `start_time`, so that each bike's rides will be ordered in time. Then, group all observations for each `bikeid` together. Within these groupings (by `bikeid`), you'll create a new observation describing the time between rides. Thus, for each of the original variables with names that begin with `start_` or `end_`, the `start_` variables in your new intervention observations should be equal to the original `end_` variables of the previous observed ride, and 2) the new `end_` variables are equal to original `start_` variables of the current observed ride.
+
+Now for most of those new intervention observations, the `start_` and `end_` variables will be the same because the bike just stays docked until the next ride. Filter those out, and you'll be left with rides where Citi Bike, for whatever reason, moved the bike between rides.
+
+Of note, you won't know where the previous ride was from for the first ride (using only this data), so that's missing data. For this exercise, assume no rebalancing occured before the first ride. Filter those out. Include the variable `usertype` and set its measurement for all these intervention observations to "Citi Bike". Finally, calculate the time difference between start and end of the transition in units of *hours*, and save as `tripduration`. Hint: you might try coding something like `difftime(end_time, start_time, units = 'hours')`.
+
+Your new data frame should include these variables:
+
+```         
+bikeid
+start_station_id
+start_station_name
+start_station_longitude
+start_station_latitude
+start_time
+end_station_id
+end_station_name
+end_station_longitude
+end_station_latitude
+end_time
+usertype
+tripduration
+```
+
+Name your new dataframe as the object `interventions`.
+
+```{r}
+
+# ENTER CODE TO TRANSFORM DATA INTO interventions
+interventions <- rider_trips %>%
+  select( -birth_year, -gender ) %>%
+  arrange(
+    bikeid, start_time
+  ) %>%
+  group_by(
+    bikeid
+  ) %>%
+   mutate(
+    across(
+      .cols = matches('end_'),
+      .fns = lag
+    )
+  ) %>%
+  rename_with(
+    .cols = contains('time') | contains('_station_'),
+    ~ if_else(
+        str_detect(., 'start'),
+        str_replace(., 'start', 'end'),
+        str_replace(., 'end', 'start')
+      )
+  ) %>%
+  filter(
+    start_station_id != end_station_id,
+    !is.na(start_station_id)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    usertype = 'Citi Bike',
+    tripduration = as.numeric(difftime(end_time, start_time, units = 'hours'))
+  )
+interventions 
+```
+
+## Question 1(b)
+
+We're curious about a docking station near Madison Square Garden: the station name is 'W 31 St & 7 Ave' and its station id is 379. How many trips originated from this station, and what percent of stations had more rides leaving?
+
+```{r}
+# total trip originated from id 379
+total_trip_379 <- rider_trips %>%
+  filter(start_station_id == 379) %>%
+  nrow()
+
+# number of trips originating from each station
+trips_per_station <- rider_trips %>%
+  group_by(start_station_id) %>%
+  summarise(total_trips = n())
+
+
+# number of station has more trips leavng than station 379
+station_with_more_ride <- trips_per_station %>% 
+  filter(total_trips > total_trip_379 ) %>%
+  nrow()
+
+# percent of stations had more rides leaving
+
+(station_with_more_ride/ nrow(trips_per_station)) *100
+
+
+
+```
+
+> Trips originated from 'W 31 St & 7 Ave' (Station ID 379): 9481
+>
+> Percentage of stations with more rides leaving: 3.726708 %
+
+## Question 1(c)
+
+For the same station, how many bikes did Citi Bike remove due to interventions, and what percent of stations did Citi Bike remove more bikes?
+
+```{r}
+# number of Citi Bike remove due to interventions from id 379
+total_remove_379 <-  interventions %>% 
+  filter(start_station_id == 379) %>%
+  nrow()
+total_remove_379
+
+# number of Citi Bike remove due to interventions from each station
+remove_per_station <- interventions %>%
+  group_by(start_station_id) %>%
+  summarise(total_interventions = n())
+remove_per_station
+
+# number of stations remove more bikes than 379
+station_with_more_remove <- remove_per_station %>% 
+  filter(total_interventions > total_remove_379 ) %>%
+  nrow()
+station_with_more_remove
+
+# what is the percentage
+100 * (station_with_more_remove / nrow(remove_per_station))
+
+
+```
+
+> Bikes remove due to interventions from 'W 31 St & 7 Ave' (Station ID 379): 48
+>
+> Percentage of stations with more interventions: 23 %
+
+## Question 1(d)
+
+Applying the grammar of graphics with `ggplot2`, create a histogram showing the distribution of the number of interventions removing bikes across stations. Use a bin width of 100. Appropriately label the x-axis and y-axis, and include a title with your interpretation (a message, not just information). Apply best practices for communicating the visual information.
+
+```{r}
+
+#number of interventions removing bikes across stations.
+remove_per_station
+
+# histogram
+ggplot(remove_per_station, aes(x = total_interventions)) +
+  geom_histogram(binwidth = 100, fill = "lightpink", color = "coral2") +
+  labs(
+    x = "Number of Interventions Removing Bikes",
+    y = "Number of Stations",
+    title = "Distribution of Interventions Removing Bikes Across Stations"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold", color = "coral3"), 
+    axis.text = element_text(size = 10, color = "darkred"), 
+    axis.title = element_text(size = 12, color = "darkred") )
+```
+
+# Question 2 --- visualizing time between rides (visually encoding data)
+
+Applying the grammar of graphics with `ggplot2`, 1) create a histogram of your calculated `tripduration` in your new data frame `interventions`, 2) layer a red, vertical line onto the histogram that marks `24` hours, and 3) add *explanatory* information including `x` and `y` labels, your main takeaway or interpretation (message, not just information) as a `title`, and a `caption` describing the source of your data.
+
+```{r}
+library(ggplot2)
+
+ggplot(interventions, aes(x = tripduration)) +
+  geom_histogram(binwidth = 1, fill = "lightpink", color = "coral") +
+  labs(
+    x = "Trip Duration (hours)",
+    y = "Frequency",
+    title = "Distribution of Trip Durations for Citi Bike Interventions",
+    caption = "Data source: Citi Bike interventions dataset"
+  ) +
+  scale_x_continuous(limits = c(0, 100)) +
+   scale_y_continuous(limits = c(0, 4500)) +
+   geom_vline(xintercept = 24, color = "red", linetype = "dashed", size = 0.8) +
+  geom_text(x = 32, y = 1000, label = "24 hours", color = "red", angle = 0, vjust = -1) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold", color = "coral3"),
+    axis.text = element_text(size = 10,  color = "darkred"),
+    axis.title = element_text(size = 12,  color = "darkred"),
+    plot.caption = element_text(size = 8, color = "grey")
+  )
+
+
+```
+
+# Question 3 --- communication, critical thinking
+
+Does our above method (creating observations when the `end_station_id` of a ride does not match the `start_station_id` of the consecutive ride) tend to accurately measure how often Citi Bike has intervened, or might our method tend to overcount, undercount, or both? Support your argument in an explanation to a Citi Bike analytics executive.
+
+> Our model has the potential to cover both overcounting and undercounting.
+>
+> Potential Overcounting: Multi-rides without station return: our method might be misinterpreted as an intervention when a customer takes multiple consecutive rides without docking the bike at a station in between. Data noise: Erroneous ride records can be presented in the form of false starts or system glitches, which in reality are not matching station IDs. Potential Undercounting: Same-Station Turnarounds: we might overcount interventions if Citi Bike removes bikes for maintenance or rebalancing, but returns them to the system before another rider uses them.
+
+# Question 4 --- communication, critical thinking
+
+Apple Maps estimates that on average a bike ride from the top of Manhattan (Inwood Hill Park) to the bottom of Manhattan (Battery Park) would take about 1.5 hours. And some *bike angels* can ride pretty fast! Obviously Citi Bike may intervene to rebalance docking stations, and in our earlier discussions we discussed four ways they try to rebalance. Consider reasons *other than* rebalancing where Citi Bike may intervene. What, if anything, does your histogram suggest about Citi Bike's methods and purposes for the observations you've calculated as interventions? Explain to a Citi Bike analytics executive.
+
+> Maintenance and repair: The histogram above presents various durations for the intervention in which there are instances of bikes being taken out of circulation for different periods. Short interventions probably include fast check-ups or minor repairs. Long ones could even consist of larger maintenance operations.
+>
+> Event/Construction Relocation: Bikes may be moved in case of short-term events, such as street fairs and construction activities.
+>
+> Seasonal Adjustments: Citi Bike might also have adjustments in operations based on seasonal usage or weather (less usage in winter and rainy days)
+>
+> Incident Response: bikes with damage will be removed due to safety concerns.
+>
+> System Upgrades: Docking stations occasionally require upgrades, leading to bike redistribution.
+>
+> Histogram Analysis: Most of the interventions are very brief in nature, meaning those that probably involve quick adjustments, minor maintenance, or short-distance rebalancing.
+>
+> Longer-lasting interventions suggest that some bikes do not immediately come back into service, potentially being restored in-depth or tactically repositioned on the fleet. Many interventions last under 24 hours, indicating efficient operational practices to minimize bike downtime.
+
+# Question 5 --- visualize location of interventions (visually encoding data)
+
+To practice layering encodings onto maps, let's try to uncover high-level patterns in the location of Citi Bike interventions.
+
+We might think of these interventions geographically (that is, locations in space). First, to visualize these interventions as locations in space, we'll overlay visual encodings onto a map of Manhattan. We can create the base map from geographic data available at [Beta NYC](https://beta.nyc/products/boundaries-map/), which we convert from the available data structure called a *spatial polygon data frame*, into a regular data frame of which we are familiar. Here's the code:
+
+```{r}
+# location of spatial polygon data frame to tibble (data.frame) for
+# boroughs and neighborhoods, convert to sf data frame
+
+url <- str_c(
+    'https://ssp3nc3r.github.io/',
+    '20213APAN5800K007/data/betanyc_hoods.geojson'
+    )
+
+nyc_neighborhoods <- read_sf(url)
+```
+
+Inspect the simple features data frame, `nyc_neighborhoods`, notice that the variable geometry contains a storage type called POLYGON, which contains information that describes the geographic locations we're interested in.
+
+From these data frames, we draw a base map of Manhattan that also shows its neighborhood boundaries. Review the help file for `geom_sf`, the function we'll use to map this spatial data onto visual encodings. Again, here's some code to create our base map:
+
+```{r}
+p_hoods <- 
+  
+  # initialize graph
+  ggplot() + 
+  
+  # remove most non-data ink
+  theme_void() +
+  
+  # add color for water (behind land polygons)
+  theme(
+    panel.background = element_rect(fill = 'lightblue')
+  ) +
+  
+  # map boundary data to visual elements (polygons)
+  geom_sf(
+    data = nyc_neighborhoods,
+    mapping = aes(geometry = geometry),
+    fill = 'white',
+    color = 'gray',
+    lwd = 0.1
+  ) +
+  
+  # define coordinate system and zoom in on Manhattan
+  coord_sf(
+    crs = sf::st_crs(4326), # World Geodetic System 1984 (WGS84)
+    xlim = c(-74.03, -73.91),
+    ylim = c( 40.695, 40.85)
+  )
+
+
+# display the graph
+p_hoods
+```
+
+To this map, you can overlay other geometric mappings like `geom_point` or `geom_segment` like with other grammar of graphics plots.
+
+There are many approaches to encode intervention data onto visual variables layered onto the map. Choose one or more visual encodings to layer intervention data onto the map. These may be visually encoded from direct observations in `interventions`, *from transformations or summaries* of those observations, or from *both*.
+
+```{r}
+
+library(viridis)
+library(dplyr)
+
+# Assuming interventions data frame contains intervention data
+
+# Calculate the number of interventions for each station
+interventions_count <- interventions %>%
+  group_by(end_station_id) %>%
+  summarise(intervention_count = n())
+interventions_count
+
+# Merge intervention count with station location data
+interventions_with_count <- left_join(interventions, interventions_count, by = "end_station_id")
+
+# Plot map with bigger points for stations with more interventions
+mybreaks <- c(500, 1000, 1500)
+  
+p_hoods +
+  geom_point(data = interventions_with_count,
+             aes(x = end_station_longitude,
+                 y = end_station_latitude,
+                 size = intervention_count,
+                 color = intervention_count),
+             shape = 20, stroke = FALSE, alpha = 1) +
+    scale_size_continuous(name = "Intervention Count", range = c(0.8, 3), 
+                        trans = "log", breaks = mybreaks) +
+  scale_alpha_continuous(name = "Intervention Count", range = c(0.09, 0.5), 
+                         trans = "log", breaks = mybreaks) +
+  scale_color_viridis(option = "magma", name = "Intervention Count", trans = "log", breaks = mybreaks) +
+  guides(color = guide_legend()) +
+  ggtitle("Interventions in Manhattan")
+
+
+
+```
+
+Explain to a Citi Bike analytics executive, *what* were your choices of visual encodings and *how* they help the executive explore patterns in Citi Bike interventions?
+
+> EXPLAIN WHAT VISUAL ENCODINGS YOU CHOSE AND WHY.
+
+# Question 6 --- combine ride data with CitiBike interventions (data transformation)
+
+Combine your new observations from `interventions` with the original observed rides in `rider_trips` into a new data frame called `allmoves`.
+
+```{r}
+interventions <- interventions %>%
+  mutate(tripduration = as.difftime(tripduration, units = "hours"))
+
+allmoves <- bind_rows(rider_trips, interventions)
+
+```
+
+# Question 7 --- estimating number of bikes at stations (data transformation and visual encodings)
+
+Next, let's look more closely at the patterns of bikes available at a station across time. Again, we don't directly have the number of bikes or number of empty parking spots available at each station at any given time, but we can estimate that information from the above data. With your data frames `rider_trips` and `interventions` (or collectively, `allmoves`), within each `station_id` you can count observed rides (and interventions): each `end_station_id` counts as `+1`, and each `start_station_id` counts as `-1`.
+
+Then, you can order them in time and use a *cumulative sum* function like `cumsum()`. Because our data arbitrarily begins at the beginning of a month, however, we should not be starting our cumulative counts at `0` (because there were already bikes at the stations). We can account for this by subtracting from the cumulative bikes the minimum at each station over the month: *e.g.*, $\sum b_i - \textrm{min}(\sum b_i)$, where $b_i \in [-1, +1]$.
+
+In the step of transforming data, calculate this across time per station for 1) your combined trips and interventions and 2) separately for just interventions.
+
+```{r}
+allmoves_observed_rides <- allmoves %>% # Select and rename relevant columns
+  select(start_station_id, end_station_id, start_time, end_time) %>%
+  mutate(start_ride = -1, end_ride = 1) %>%    # Reshape data
+  pivot_longer(cols = c(start_ride, end_ride), names_to = "ride_type", values_to = "bike_count") %>% 
+# Determine the time and station_id based on ride_type, ensuring time retains POSIXct format
+   mutate(
+    time = case_when(  ride_type == "start_ride" ~ start_time, TRUE ~ end_time ),
+    station_id = case_when( ride_type == "start_ride" ~ start_station_id, TRUE ~ end_station_id))  %>%
+  select(-start_time, -end_time, -start_station_id, -end_station_id, -ride_type) %>%
+  # Drop unnecessary columns
+   arrange(time) %>%  # Order by time
+   group_by(station_id) %>%  
+  # calculate cumulative sum and adjustments
+ mutate(
+    cumulative_bikes = cumsum(bike_count),
+    adjusted_bikes = cumulative_bikes - min(cumulative_bikes)
+  ) %>%
+  ungroup()
+
+
+
+
+interventions_observed_rides <- interventions %>%
+  select(start_station_id, end_station_id, start_time, end_time) %>%
+  mutate(start_ride = -1, end_ride = 1) %>%
+  pivot_longer(cols = c(start_ride, end_ride), names_to = "ride_type", values_to = "bike_count") %>%
+  mutate(
+    time = case_when(ride_type == "start_ride" ~ start_time, TRUE ~ end_time),
+    station_id = case_when(ride_type == "start_ride" ~ start_station_id, TRUE ~ end_station_id)
+  ) %>%
+  select(-start_time, -end_time, -start_station_id, -end_station_id, -ride_type) %>%
+  arrange(time) %>%
+  group_by(station_id) %>%
+  mutate(
+    cumulative_bikes = cumsum(bike_count)
+  ) %>%
+  ungroup() %>%
+  group_by(station_id) %>%
+  mutate(
+    adjusted_bikes = cumulative_bikes - min(cumulative_bikes)
+  ) %>%
+  ungroup()
+
+  
+ 
+```
+
+In the step of visually encoding the transformed data, graph the two cumulative sums of all across time at one particular station: "W 31 St & 7 Ave", which is near Penn Station. Categorically encode the cumulative sum of combined trips and interventions in *black*, and encode the cumulative sum of just interventions in *red*.
+
+```{r}
+# filter particular station
+allmoves_379_station <- allmoves_observed_rides %>%
+  filter(station_id == "379")
+interventions_379_station <- interventions_observed_rides %>%
+  filter(station_id == "379")
+
+#combined trip
+combined_data <- bind_rows( 
+  allmoves_379_station %>% 
+    mutate(category = "Trips and Interventions"),
+  interventions_379_station %>%
+    mutate(category = "Just Interventions"))
+
+
+ggplot(combined_data, aes(x = time, y = adjusted_bikes, color = category)) +
+  geom_line() +
+  scale_color_manual(values = c("Trips and Interventions" = "black", "Just Interventions" = "red")) +
+  labs(title = "Cumulative Bikes over Time at W 31 St & 7 Ave Station",
+       x = "Time",
+       y = "Adjusted Cumulative Bikes",
+       color = "Category") +
+  theme_minimal()
+
+
+
+
+```
+
+# Question 8 --- communication, critical thinking
+
+For the questions below, explain your answers to a Citi Bike analytics executive:
+
+Did your graph reveal any patterns in bike and docking availability, Citi Bike interventions, or relationships between them at the station "W 31 St & 7 Ave", which is located near Penn Station?
+
+> Just Intervention: the overall upward red line indicate a growing Citi Bike intervention. It could be cause by adapting to the changing ridership patterns and making sure that even though the demand varies, the service consistency can be maintained.
+>
+> Trips & intervention: The black line does show some plateaus or slow increases at times, which would seem to suggest that these interventions are responses to high usage or perhaps low availability of bikes.
+>
+> Overall: we observe significant increases in bike availability at intervals, suggesting targeted rebalancing efforts. The fluctuation of the black line shows the overall fluctuations of bike rides. It fluctuates probably rhythmically well within the expected line of behaviors of commuting, probably with sharper drops during peak and gentle growths at less busy hours. This insight is very key towards optimizing bike distribution, demand prediction, and enhancing service reliability for the commuters from this major station.
+
+How, if at all, does your graph above address any limitations of the graph titled, "CITI BIKE HOURLY ACTIVITY AND BALANCE" by [Columbia University's Center for Spatial Research](https://c4sr.columbia.edu/projects/citibike-rebalancing-study) (from homework two) in the context of exploring rebalancing?
+
+> Time dimension: whereas the "Citi Bike Hourly Balance" heatmap does show a detailed insight into how the use of the bike system changes by the hour, this is across only one day of data. The above graph of cumulative sum views trends more over the longer term (in days) and gives a more continuous temporal resolution over days.
+>
+> Cumulative View: the heatmap collected that data by captcher the data of bike stations every hour. It's good for catching short-term changes, but it doesn't show the bigger picture. The cumulative sums showing how the bike availability changes over days. This way, we can see if Citi Bike's efforts to move bikes around (rebalancing) are actually working in the long run.
+>
+> Specific Location Focus: The cumulative graph is focused on a particular station ("W 31 St & 7 Ave Station"). If the previous heatmap was more generalized or city-wide, then the cumulative graph addresses the limitation of not providing station-specific insights that are crucial for targeted rebalancing strategies.
+
+What type of data transformations or visual encodings would you recommend that Citi Bike explore next to continue learning how to improve their rebalancing efforts and why?
+
+> Other than keep update the heatmap, Citi Bike could consider the following types of data transformations and visual encodings to improve rebalancing efforts.
+>
+> Variable: breakdown the bike usage data into trend, seasonal, events. It would help to identify underlying patterns and irregularities over time, making it easier to predict demand and plan rebalancing actions accordingly.
+>
+> Predictive Modelling: Employ machine learning algorithms to predict future bike demand based on historical data including the variable data that mention above.
+>
+> Demand Elasticity Models: Understanding how sensitive the demand for bikes is to various factors (such as weather, time of day, day of the week, local events) can help Citi Bike predict changes in bike usage and adjust rebalancing efforts preemptively.
+>
+> Multivariate Analysis: Visualizations that can incorporate multiple variables (such as weather, traffic, urban events) alongside bike usage statistics to find correlations and causations that affect bike rebalancing needs.
+>
+> Accessibility Index Mapping: involves formulating an index to gauge the effectiveness of the existing bike distribution in meeting the needs of the population. This index considers various factors such as proximity to bikes, availability of bikes, and connectivity to other modes of transportation.
+
+**Annotate** your above graph with a `title`, `subtitle`, and other markings to **explain your interpretation and insights** for a **mixed-audience** of Citi Bike's executives.
+
+```{r}
+
+ggplot(combined_data, aes(x = time, y = adjusted_bikes, color = category)) +
+  geom_line() +
+  scale_color_manual(values = c("Trips and Interventions" = "black", "Just Interventions" = "red")) +
+  
+  labs(title = "Bike Usage and Rebalancing Insights",
+       subtitle = "Adjusted cumulative bike counts at W 31 St & 7 Ave Station show usage patterns and intervention efforts",
+       x = "Time",
+       y = "Adjusted Cumulative Bikes",
+       color = "Category") +
+  
+  # Customizing the theme to make it more accessible
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold"),
+        plot.subtitle = element_text(face = "italic"),
+        legend.position = "bottom",
+        plot.margin = margin(t = 5.5, r = 40, b = 5.5, l = 5.5, unit = "pt")) +
+  coord_cartesian(clip = "off") + 
+   theme(plot.background = element_blank(),
+        panel.background = element_blank()) +
+  
+  # Adding annotations for specific observations
+ annotate("text", x = as.POSIXct('2019-09-07'), y = -5, label = "Unknow Variable: low intervention ", color = "blue", size = 3, angle = 360, vjust = 1) +
+  annotate("text", x = as.POSIXct('2019-09-10'), y = 60, label = "Unknow Variable: high intervention ", color = "blue", size = 3, angle = 360, vjust = 1) +
+  
+  # Adding custom annotations to explain the markings
+  geom_label(aes(x = as.POSIXct('2019-09-28'), y = 55, label = "responses to high usage or perhaps low availability "),
+             color = "white", fill = "darkgrey", size = 3) +
+  geom_label(aes(x = as.POSIXct('2019-09-28'), y = 110, label = "indicate upward rebalancing interventions"),
+             color = "white", fill = "red", size = 3)
+
+
+
+
+```
+
+# References cited
+
+Properly **Cite** all resources used in completing this assignment:
+
+Center for Spatial Research. (n.d.). *CitiBike Rebalancing Study*. Columbia University. Retrieved Mar 26, 2024, from <https://c4sr.columbia.edu/projects/citibike-rebalancing-study>
+
+Citi Bike NYC. (n.d.). *Citi Bike System Data*. Retrieved Mar 26, 2024, from <https://citibikenyc.com/system-data>
+
+# Submission --- reproducibility
+
+In submitting this **individual** assignment, you are representing your answers are your own.
+
+**Knit** your answers in this r markdown file into an `html` file. Submit into courseworks both files (the `lastname-firstname-hw4.rmd` and the knitted `lastname-firstname-hw4.html`). We should be able to reproduce your `html` file just by opening your `rmd` file and knitting.
