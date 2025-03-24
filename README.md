@@ -47,7 +47,6 @@ Legend - “Intervention Count”: A clear legend correlates dot sizes and color
 These visual choices help identify where interventions are most needed, facilitating effective resource allocation and strategic planning.
 
 
-![image](https://github.com/user-attachments/assets/a4d96cbb-8cb2-4e7c-868f-7c7712588dfa)
 ![image](https://github.com/user-attachments/assets/0b6c3bf2-e882-4edc-8cb3-22dda238fa04)
 
 
