@@ -489,8 +489,5 @@ Center for Spatial Research. (n.d.). *CitiBike Rebalancing Study*. Columbia Univ
 
 Citi Bike NYC. (n.d.). *Citi Bike System Data*. Retrieved Mar 26, 2024, from <https://citibikenyc.com/system-data>
 
-# Submission --- reproducibility
 
-In submitting this **individual** assignment, you are representing your answers are your own.
 
-**Knit** your answers in this r markdown file into an `html` file. Submit into courseworks both files (the `lastname-firstname-hw4.rmd` and the knitted `lastname-firstname-hw4.html`). We should be able to reproduce your `html` file just by opening your `rmd` file and knitting.
