@@ -1,4 +1,4 @@
-# Citi_Bike_Interventions
+# CitiBike_Interventions
 This project examines how Citi Bike usage patterns have shifted alongside changes in urban mobility driven by evolving work routines and city lifestyles.
 This project provides a comprehensive analysis of bike station utilization over time by tracking the inflow and outflow of bikes at various stations. Utilizing data sets that capture both rider trips and specific interventions, such as bike relocations, we methodically calculate the net changes in bike availability at each station. Each bike arrival is recorded as an addition and each departure as a subtraction. These changes are aggregated into a cumulative count, which is then adjusted to account for the existing number of bikes at the start of the data collection period. The analysis offers insights into the patterns of bike usage and station occupancy, aiding in the optimization of bike-sharing operations and infrastructure planning. This project not only highlights temporal trends in bike station utilization but also provides a basis for further strategic enhancements to bike-sharing systems.
 
